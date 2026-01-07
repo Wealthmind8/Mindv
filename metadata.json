@@ -1,0 +1,7 @@
+{
+  "name": "Aria: Empathetic Grief Companion",
+  "description": "A comforting, intuitive voice companion that provides deep emotional support and understanding for those navigating grief, powered by Gemini Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
