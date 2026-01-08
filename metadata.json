@@ -1,6 +1,6 @@
 {
   "name": "MindV: Advanced AI Orchestrator",
-  "description": "MindV is a high-performance, multilingual AI assistant powered by Gemini. It combines the world's most advanced reasoning to provide real-time voice and text support.",
+  "description": "MindV is a high-performance, multilingual AI voice assistant powered by Gemini.",
   "requestFramePermissions": [
     "microphone"
   ]
