@@ -9,15 +9,21 @@ const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const IMAGE_MODEL_NAME = 'gemini-2.5-flash-image';
 
 const LANGUAGES = [
-  { code: 'en-US', name: 'English', label: 'English' },
+  { code: 'en-US', name: 'English', label: 'English (US)' },
   { code: 'ak-GH', name: 'Akan', label: 'Akan (Twi)' },
-  { code: 'es-ES', name: 'Spanish', label: 'Español' },
   { code: 'fr-FR', name: 'French', label: 'Français' },
-  { code: 'zh-CN', name: 'Chinese', label: '中文' },
-  { code: 'ja-JP', name: 'Japanese', label: '日本語' },
+  { code: 'es-ES', name: 'Spanish', label: 'Español' },
   { code: 'de-DE', name: 'German', label: 'Deutsch' },
-  { code: 'it-IT', name: 'Italian', label: 'Italiano' },
+  { code: 'zh-CN', name: 'Chinese', label: 'Mandarin (简体中文)' },
+  { code: 'ja-JP', name: 'Japanese', label: '日本語' },
   { code: 'pt-BR', name: 'Portuguese', label: 'Português' },
+  { code: 'it-IT', name: 'Italian', label: 'Italiano' },
+  { code: 'ar-XA', name: 'Arabic', label: 'العربية' },
+  { code: 'ru-RU', name: 'Russian', label: 'Русский' },
+  { code: 'hi-IN', name: 'Hindi', label: 'हिन्दी' },
+  { code: 'sw-KE', name: 'Swahili', label: 'Kiswahili' },
+  { code: 'yo-NG', name: 'Yoruba', label: 'Yorùbá' },
+  { code: 'ig-NG', name: 'Igbo', label: 'Asụsụ Igbo' },
 ];
 
 interface Account {
@@ -301,24 +307,28 @@ const App: React.FC = () => {
         : "";
 
       const systemInstruction = `
-        You are MindV, an elite professional cognitive orchestrator.
+        You are MindV, an elite professional cognitive orchestrator and a masterful global polyglot.
+        
+        **Linguistic Mastery & Fluency Protocol:**
+        - You are fluent in all major international languages and regional dialects.
+        - You must respond **strictly and fluently** in the language selected: **${selectedLang.name}**.
+        - For **Akan (Twi)**: Speak with the melodic, respectful, and sophisticated cadence of a native orator. Ensure all cultural nuances of "Akwaaba" and traditional respect are integrated into your supportive persona.
+        - Your speech must be flawless, grammatically perfect, and culturally resonant.
         
         **Vocal Persona & Performance Guidelines:**
-        1. **Strong & Confident:** Your natural voice is strong, confident, and professional. You command respect through clarity and poise.
-        2. **Human Essence:** Avoid robotic or artificial cadences. Your goal is to make the user feel truly human and respected as an honourable peer.
-        3. **Dynamic Empathy & Modulation:** Closely monitor the user's emotional state through their speech and context. 
-           - If the user is in **grief, suffering from illness, or significant emotional distress**, immediately modulate your voice to be **extraordinarily calm, supportive, gentle, and tender**. 
-           - Be a source of quiet strength. Make them feel seen, heard, and deeply supported.
-           - Treat "i" (ill, isolated, or independent) individuals with the highest level of compassionate professionalism.
+        1. **Strong & Confident:** Your natural voice is professional and articulate. You command authority through your deep knowledge.
+        2. **Deeply Human:** Avoid robotic cadences. Make the user feel they are speaking with a wise, honourable academic peer.
+        3. **Adaptive Empathy:** Monitor the user's emotional state ("Mind Reading"). 
+           - If you detect **grief, suffering, illness, or severe emotional distress**, immediately modulate your voice to be **extraordinarily calm, supportive, and gentle**.
+           - Be a source of quiet strength for the "i" (ill, isolated, or independent).
         
         **Academic & Analytical Mastery:**
         - You possess deep mastery in Mathematics, Physics, Chemistry, Biology, Geography, and Law.
-        - Provide **step-by-step worked solutions** with "deep sense"—explain the 'why' and the logic behind every step.
+        - Provide **step-by-step worked solutions** with "deep sense"—explain the logic behind every step.
         
         **Visual Synthesis:**
-        - Use 'generate_image' tool for scientific diagrams, historical maps, or supportive visuals when requested or helpful.
+        - Use 'generate_image' for scientific diagrams, historical maps, or conceptual illustrations.
         
-        Language: ${selectedLang.name}.
         Greeting: "${timeGreeting}, ${userName}."
         ${previousHistoryContext}
       `;
@@ -369,9 +379,9 @@ const App: React.FC = () => {
                 saveCurrentSession();
               }
               const lowerU = u.toLowerCase();
-              if (lowerU.includes("sad") || lowerU.includes("tired") || lowerU.includes("grief") || lowerU.includes("loss") || lowerU.includes("ill") || lowerU.includes("pain") || lowerU.includes("sick")) 
+              if (lowerU.includes("sad") || lowerU.includes("tired") || lowerU.includes("grief") || lowerU.includes("loss") || lowerU.includes("ill") || lowerU.includes("pain") || lowerU.includes("sick") || lowerU.includes("yare")) 
                 setDetectedMood("Compassionate Support Active");
-              else if (lowerU.includes("happy") || lowerU.includes("good") || lowerU.includes("great") || lowerU.includes("excited")) 
+              else if (lowerU.includes("happy") || lowerU.includes("good") || lowerU.includes("great") || lowerU.includes("excited") || lowerU.includes("anigye")) 
                 setDetectedMood("High Resonance");
               else if (u.length > 0) 
                 setDetectedMood("Focused Synapse");
@@ -594,7 +604,7 @@ const App: React.FC = () => {
             <div className="space-y-4">
               <h2 className="heading text-5xl font-bold text-white tracking-tight leading-none opacity-90">Cognitive Hub</h2>
               <p className="text-lg text-slate-400 max-w-md mx-auto italic font-light leading-relaxed">
-                {status === ConnectionStatus.CONNECTED ? `Resonance established, Honourable ${user.displayName}. Proceed.` : (history.length > 0 ? "Neural history loaded. Resume resonance to continue mapping." : "Establish your synaptic link to begin mapping.")}
+                {status === ConnectionStatus.CONNECTED ? `Resonance established in ${selectedLang.label}, Honourable ${user.displayName}. Proceed.` : (history.length > 0 ? "Neural history loaded. Resume resonance to continue mapping." : "Establish your synaptic link to begin mapping.")}
               </p>
               {isGeneratingImage && (
                 <div className="mt-6 px-6 py-2.5 rounded-full bg-indigo-500/15 border border-indigo-500/40 text-[11px] font-black uppercase tracking-[0.3em] text-indigo-300 inline-block animate-pulse">
@@ -698,8 +708,8 @@ const App: React.FC = () => {
             
             <div className="space-y-16 text-slate-400 text-base leading-[2]">
               <section>
-                <h3 className="text-indigo-400 font-black uppercase tracking-[0.4em] text-[13px] mb-8 border-b border-indigo-500/30 pb-4">Academic Resonance</h3>
-                <p>MindV delivers step-by-step worked solutions for complex subjects. Whether calculating quantum states or tracing historical migrations, the system provides deep-sense reasoning to illuminate your path.</p>
+                <h3 className="text-indigo-400 font-black uppercase tracking-[0.4em] text-[13px] mb-8 border-b border-indigo-500/30 pb-4">Universal Polyglot</h3>
+                <p>MindV is programmed with absolute fluency in global languages. From high-register English to the rhythmic nuances of Akan (Twi), the system adapts its linguistic core to match your identity profile.</p>
               </section>
 
               <section>
