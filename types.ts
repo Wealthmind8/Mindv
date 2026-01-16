@@ -8,7 +8,8 @@ export enum ConnectionStatus {
 
 export interface TranscriptionEntry {
   role: 'user' | 'aria';
-  text: string;
+  text?: string;
+  image?: string; // Base64 data URL for generated images
   timestamp: number;
 }
 
