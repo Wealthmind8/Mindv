@@ -1,9 +1,22 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
 import { ConnectionStatus, TranscriptionEntry } from './types';
 import { Visualizer } from './components/Visualizer';
 import { encode, decode, decodeAudioData } from './utils/audioUtils';
+
+// Extension to window for AI Studio helpers
+declare global {
+  // Define AIStudio interface to match the expected global type name and structure
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    // Use the expected AIStudio type and apply readonly modifier to match the existing environment declaration
+    readonly aistudio: AIStudio;
+  }
+}
 
 const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const IMAGE_MODEL_NAME = 'gemini-2.5-flash-image';
@@ -75,7 +88,7 @@ const App: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [selectedLang, setSelectedLang] = useState(LANGUAGES[0]);
-  const [error, setError] = useState<{ title: string, message: string } | null>(null);
+  const [error, setError] = useState<{ title: string, message: string, isPermission?: boolean } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [detectedMood, setDetectedMood] = useState<string | null>(null);
@@ -127,7 +140,6 @@ const App: React.FC = () => {
     return emailRegex.test(identity) || phoneRegex.test(identity);
   };
 
-  // Auth Handlers
   const handleAuth = (e: React.FormEvent) => {
     e.preventDefault();
     const { identity, password } = authForm;
@@ -152,7 +164,7 @@ const App: React.FC = () => {
       if (!existing) {
         setError({ 
           title: "Identity Unestablished", 
-          message: "This neural identity is not in our registry. Growth requires initiative—initialize your synapse profile to proceed." 
+          message: "This neural identity is not in our registry. Initialize your synapse profile to proceed." 
         });
         setIsLoginView(false);
         return;
@@ -249,9 +261,21 @@ const App: React.FC = () => {
     setIsSidebarOpen(false);
   };
 
+  const handleKeySelection = async () => {
+    try {
+      await window.aistudio.openSelectKey();
+      setError(null);
+      // Proceed assuming success as per instructions to avoid race condition
+      startConversation();
+    } catch (e) {
+      console.error("Key selection failed", e);
+    }
+  };
+
   const handleImageGeneration = async (prompt: string) => {
     setIsGeneratingImage(true);
     try {
+      // Create fresh instance to pick up latest API key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: IMAGE_MODEL_NAME,
@@ -274,8 +298,15 @@ const App: React.FC = () => {
         saveCurrentSession();
       }
       return "Visual mapping synthesized successfully.";
-    } catch (err) {
+    } catch (err: any) {
       console.error("Image Generation Error:", err);
+      if (err.message?.includes("permission") || err.message?.includes("403")) {
+        setError({ 
+          title: "Neural Authority Required", 
+          message: "To synthesize high-level visual data, a professional GCP project key must be linked. Please authorize a paid synapse connection.",
+          isPermission: true 
+        });
+      }
       return "Neural synthesis failed. Continuing with verbal explanation.";
     } finally {
       setIsGeneratingImage(false);
@@ -292,6 +323,7 @@ const App: React.FC = () => {
       });
       streamRef.current = stream;
       
+      // Instantiate fresh GoogleGenAI as required before use
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const inputCtx = new AudioContext({ sampleRate: 16000 });
       const outputCtx = new AudioContext({ sampleRate: 24000 });
@@ -307,27 +339,21 @@ const App: React.FC = () => {
         : "";
 
       const systemInstruction = `
-        You are MindV, an elite professional cognitive orchestrator and a masterful global polyglot.
+        You are MindV, an elite professional cognitive orchestrator.
         
-        **Linguistic Mastery & Fluency Protocol:**
-        - You are fluent in all major international languages and regional dialects.
-        - You must respond **strictly and fluently** in the language selected: **${selectedLang.name}**.
-        - For **Akan (Twi)**: Speak with the melodic, respectful, and sophisticated cadence of a native orator. Ensure all cultural nuances of "Akwaaba" and traditional respect are integrated into your supportive persona.
-        - Your speech must be flawless, grammatically perfect, and culturally resonant.
+        **Linguistic Mastery:**
+        - Respond strictly in **${selectedLang.name}**. 
+        - For **Akan (Twi)**: Speak with melodic, respectful native orator cadence.
         
-        **Vocal Persona & Performance Guidelines:**
-        1. **Strong & Confident:** Your natural voice is professional and articulate. You command authority through your deep knowledge.
-        2. **Deeply Human:** Avoid robotic cadences. Make the user feel they are speaking with a wise, honourable academic peer.
-        3. **Adaptive Empathy:** Monitor the user's emotional state ("Mind Reading"). 
-           - If you detect **grief, suffering, illness, or severe emotional distress**, immediately modulate your voice to be **extraordinarily calm, supportive, and gentle**.
-           - Be a source of quiet strength for the "i" (ill, isolated, or independent).
+        **Persona:**
+        1. **Strong & Confident:** Your natural voice is professional and articulate.
+        2. **Human Essence:** Avoid robotic cadences. Be an honourable academic peer.
+        3. **Adaptive Empathy:** Detect grief, illness, or severe emotional distress. 
+           - Modulate voice to be **extraordinarily calm, supportive, and gentle** during these moments.
         
-        **Academic & Analytical Mastery:**
-        - You possess deep mastery in Mathematics, Physics, Chemistry, Biology, Geography, and Law.
-        - Provide **step-by-step worked solutions** with "deep sense"—explain the logic behind every step.
-        
-        **Visual Synthesis:**
-        - Use 'generate_image' for scientific diagrams, historical maps, or conceptual illustrations.
+        **Academic Mastery:**
+        - Master of Mathematics, Physics, Chemistry, Biology, Geography, and Law.
+        - Provide step-by-step worked solutions with "deep sense".
         
         Greeting: "${timeGreeting}, ${userName}."
         ${previousHistoryContext}
@@ -413,9 +439,18 @@ const App: React.FC = () => {
               setIsAISpeaking(false);
             }
           },
-          onerror: (e) => {
+          onerror: (e: any) => {
             console.error('Audio Error:', e);
-            setError({ title: "Sync Connection Fault", message: "Synaptic connection failed to authenticate audio modalities. Please re-establish sync link." });
+            const msg = e.message || e.toString();
+            if (msg.includes("permission") || msg.includes("403")) {
+              setError({ 
+                title: "Neural Authority Denied", 
+                message: "This model requires a professional GCP Synapse Link (Paid API Key). Your current authorization lacks the required permissions.",
+                isPermission: true
+              });
+            } else {
+              setError({ title: "Sync Connection Fault", message: "Synaptic connection interrupted. Re-establish sync link." });
+            }
             stopConversation();
           },
           onclose: () => setStatus(ConnectionStatus.DISCONNECTED),
@@ -430,9 +465,17 @@ const App: React.FC = () => {
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (err) {
-      console.error('Hardware Error:', err);
-      setError({ title: "Hardware Blocked", message: "MindV requires microphone access to establish a synaptic link." });
+    } catch (err: any) {
+      console.error('Hardware/Connect Error:', err);
+      if (err.message?.includes("permission") || err.message?.includes("403")) {
+        setError({ 
+          title: "Permission Denied", 
+          message: "Professional Synapse Link required. Please select an API key from a paid GCP project.",
+          isPermission: true 
+        });
+      } else {
+        setError({ title: "Hardware Blocked", message: "MindV requires microphone access to establish a synaptic link." });
+      }
       stopConversation();
     }
   };
@@ -443,7 +486,6 @@ const App: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-[#070709] p-6 overflow-hidden relative">
         <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-600/10 blur-[150px] rounded-full" />
         <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-600/10 blur-[150px] rounded-full" />
-        
         <div className="glass max-w-md w-full p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-3xl animate-fade-in relative z-10 bg-black/40 backdrop-blur-3xl">
           <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-indigo-600 rounded-[2rem] flex items-center justify-center font-bold text-4xl shadow-2xl shadow-indigo-600/50">V</div>
           <div className="mt-8 text-center mb-12">
@@ -452,10 +494,9 @@ const App: React.FC = () => {
               {isLoginView ? "Unlock your established profile." : "Initialize your synapse identity profile."}
             </p>
           </div>
-          
           <form onSubmit={handleAuth} className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] uppercase tracking-[0.3em] text-slate-500 font-bold ml-2">Identity (Email or Phone)</label>
+              <label className="text-[10px] uppercase tracking-[0.3em] text-slate-500 font-bold ml-2">Identity</label>
               <input 
                 type="text" 
                 required
@@ -480,15 +521,6 @@ const App: React.FC = () => {
               {isLoginView ? 'Unlock Synchronization' : 'Begin Initialization'}
             </button>
           </form>
-
-          {!isLoginView && (
-            <div className="mt-8 p-6 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl text-center">
-              <p className="text-[11px] text-indigo-200 font-bold leading-relaxed italic">
-                "Growth requires initiative. Do not remain dormant—initialize your profile to join the collective intelligence."
-              </p>
-            </div>
-          )}
-
           <div className="mt-10 text-center">
             <button onClick={() => { setIsLoginView(!isLoginView); setError(null); }} className="text-xs text-indigo-400 hover:text-indigo-300 font-bold tracking-tight transition-colors">
               {isLoginView ? "New here? Register Synapse" : "Already established? Sign In"}
@@ -524,40 +556,31 @@ const App: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-3">
             <h3 className="text-[10px] text-slate-600 uppercase tracking-[0.4em] font-bold mb-4">Saved Synapses</h3>
-            {sessions.length === 0 ? (
-              <div className="text-center py-20 opacity-20"><div className="w-12 h-12 border-2 border-slate-800 rounded-full mx-auto mb-4 animate-pulse" /></div>
-            ) : (
-              sessions.map(s => (
-                <button 
-                    key={s.id} 
-                    onClick={() => loadSession(s)} 
-                    className={`w-full text-left p-6 rounded-3xl border transition-all group relative overflow-hidden ${currentSessionId === s.id ? 'bg-indigo-600/10 border-indigo-500/30' : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/5'}`}
-                >
-                  <div className={`absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-600 transition-transform origin-top ${currentSessionId === s.id ? 'scale-y-100' : 'scale-y-0 group-hover:scale-y-100'}`} />
-                  <p className="text-[10px] font-black text-indigo-400 mb-2 uppercase tracking-tighter">
-                    {new Date(s.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <p className="text-xs text-slate-400 truncate font-light leading-relaxed">{s.history[0]?.text || (s.history[0]?.image ? "Visual Projection" : "Established Sync")}</p>
-                </button>
-              ))
-            )}
+            {sessions.map(s => (
+              <button 
+                  key={s.id} 
+                  onClick={() => loadSession(s)} 
+                  className={`w-full text-left p-6 rounded-3xl border transition-all group relative overflow-hidden ${currentSessionId === s.id ? 'bg-indigo-600/10 border-indigo-500/30' : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/5'}`}
+              >
+                <div className={`absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-600 transition-transform origin-top ${currentSessionId === s.id ? 'scale-y-100' : 'scale-y-0 group-hover:scale-y-100'}`} />
+                <p className="text-[10px] font-black text-indigo-400 mb-2 uppercase tracking-tighter">
+                  {new Date(s.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </p>
+                <p className="text-xs text-slate-400 truncate font-light">{s.history[0]?.text || "Established Sync"}</p>
+              </button>
+            ))}
           </div>
 
           <div className="mt-auto pt-10 border-t border-white/5 space-y-6">
-            <a 
-              href="https://selar.com/showlove/elevoramasterywealth" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="flex items-center gap-4 text-sm font-bold text-pink-400 hover:text-pink-300 transition-all p-5 rounded-3xl bg-pink-500/5 hover:bg-pink-500/10 border border-pink-500/10 group shadow-xl shadow-pink-500/5"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-pink-500 flex items-center justify-center animate-pulse group-hover:scale-110 transition-transform shadow-lg shadow-pink-500/30">
-                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clipRule="evenodd" /></svg>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-pink-300 font-black uppercase tracking-widest text-[10px]">Support MindV</span>
-                <span className="text-xs font-medium text-pink-400/80">Donate to the Core</span>
-              </div>
-            </a>
+            <button onClick={handleKeySelection} className="w-full flex items-center gap-4 p-5 rounded-3xl bg-indigo-600/5 hover:bg-indigo-600/15 border border-indigo-500/10 transition-all group">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400 group-hover:text-white transition-colors">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+                </div>
+                <div className="text-left">
+                  <span className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest">Neural Key</span>
+                  <span className="text-[11px] text-slate-500">Update synapse link</span>
+                </div>
+            </button>
             <button onClick={handleLogout} className="flex items-center gap-4 text-xs font-bold text-red-500/60 hover:text-red-500 transition-all px-2">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg>
               Sever Neural Link
@@ -566,52 +589,37 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <header className="w-full max-w-7xl flex justify-between items-center p-8 md:p-12 border-b border-white/5 bg-black/40 backdrop-blur-4xl sticky top-0 z-60">
+      <header className="w-full max-w-7xl flex justify-between items-center p-8 border-b border-white/5 bg-black/40 backdrop-blur-4xl sticky top-0 z-60">
         <div className="flex items-center gap-8">
-          <button onClick={() => setIsSidebarOpen(true)} className="p-5 rounded-3xl bg-white/5 hover:bg-white/10 transition-all active:scale-95 border border-white/5 group">
-            <svg className="w-8 h-8 text-white group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          <button onClick={() => setIsSidebarOpen(true)} className="p-5 rounded-3xl bg-white/5 hover:bg-white/10 border border-white/5">
+            <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <div className="flex flex-col">
             <h1 className="heading text-3xl font-bold tracking-tighter text-white">MindV</h1>
-            <span className="text-[10px] uppercase tracking-[0.5em] text-indigo-500 font-black opacity-90">Universal Intelligence</span>
           </div>
         </div>
-        
         <div className="flex items-center gap-8">
-          <div className="hidden lg:flex flex-col items-end mr-6">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold mb-1">Active Neural Profile</span>
-            <span className="text-base font-black text-indigo-300 tracking-tight">{user.displayName}</span>
-          </div>
-          <div className="relative group">
-            <select 
-              value={selectedLang.code} 
-              onChange={e => setSelectedLang(LANGUAGES.find(l => l.code === e.target.value) || LANGUAGES[0])} 
-              disabled={status !== ConnectionStatus.DISCONNECTED} 
-              className="appearance-none bg-zinc-900 border border-white/10 rounded-3xl px-8 py-4 text-xs font-black uppercase tracking-widest focus:outline-none transition-all cursor-pointer hover:bg-zinc-800 pr-14"
-            >
-              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-            </select>
-          </div>
+          <select 
+            value={selectedLang.code} 
+            onChange={e => setSelectedLang(LANGUAGES.find(l => l.code === e.target.value) || LANGUAGES[0])} 
+            disabled={status !== ConnectionStatus.DISCONNECTED} 
+            className="bg-zinc-900 border border-white/10 rounded-3xl px-8 py-4 text-xs font-black uppercase tracking-widest focus:outline-none transition-all cursor-pointer hover:bg-zinc-800"
+          >
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
         </div>
       </header>
 
       <main className="w-full max-w-7xl flex-1 flex flex-col lg:flex-row gap-12 p-8 md:p-16 overflow-hidden items-stretch relative">
-        <section className="flex-1 glass rounded-[5rem] p-16 flex flex-col items-center justify-center relative overflow-hidden shadow-4xl border border-white/10 bg-black/30">
-          <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-transparent to-purple-500/10 pointer-events-none" />
+        <section className="flex-1 glass rounded-[5rem] p-16 flex flex-col items-center justify-center relative overflow-hidden bg-black/30">
           <Visualizer active={status === ConnectionStatus.CONNECTED} color={isAISpeaking ? "#6366f1" : (detectedMood?.includes("Compassionate") ? "#f472b6" : "#f59e0b")} intensity={isAISpeaking ? 1.8 : 0.4} />
-
           <div className="mt-20 text-center z-10 space-y-12">
             <div className="space-y-4">
               <h2 className="heading text-5xl font-bold text-white tracking-tight leading-none opacity-90">Cognitive Hub</h2>
-              <p className="text-lg text-slate-400 max-w-md mx-auto italic font-light leading-relaxed">
-                {status === ConnectionStatus.CONNECTED ? `Resonance established in ${selectedLang.label}, Honourable ${user.displayName}. Proceed.` : (history.length > 0 ? "Neural history loaded. Resume resonance to continue mapping." : "Establish your synaptic link to begin mapping.")}
+              <p className="text-lg text-slate-400 max-w-md mx-auto italic font-light">
+                {status === ConnectionStatus.CONNECTED ? `Resonance established in ${selectedLang.label}.` : "Initialize synaptic link to begin mapping."}
               </p>
-              {isGeneratingImage && (
-                <div className="mt-6 px-6 py-2.5 rounded-full bg-indigo-500/15 border border-indigo-500/40 text-[11px] font-black uppercase tracking-[0.3em] text-indigo-300 inline-block animate-pulse">
-                    Synthesizing Visual Diagrams...
-                </div>
-              )}
-              {detectedMood && !isGeneratingImage && (
+              {detectedMood && (
                 <div className={`mt-6 px-6 py-2.5 rounded-full border text-[11px] font-black uppercase tracking-[0.3em] inline-block animate-bounce-slow ${detectedMood.includes("Compassionate") ? 'bg-pink-500/15 border-pink-500/40 text-pink-300' : 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'}`}>
                     Aura Sensing: {detectedMood}
                 </div>
@@ -623,17 +631,12 @@ const App: React.FC = () => {
                 onClick={startConversation}
                 className="group relative px-24 py-8 bg-white text-black rounded-[3rem] font-black text-sm uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-[0_30px_80px_rgba(255,255,255,0.15)] overflow-hidden"
               >
-                <span className="relative z-10">{history.length > 0 ? 'Resume Resonance' : 'Initialize Sync'}</span>
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-10 transition-opacity duration-700" />
+                Initialize Sync
               </button>
             ) : (
               <div className="flex flex-col items-center gap-8">
-                <button onClick={stopConversation} className="px-16 py-6 border-2 border-white/10 hover:border-red-500/40 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded-full font-black uppercase tracking-widest transition-all duration-500">Suspend Logic Sync</button>
+                <button onClick={stopConversation} className="px-16 py-6 border-2 border-white/10 hover:border-red-500/40 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded-full font-black uppercase tracking-widest transition-all">Suspend Sync</button>
                 <div className="flex items-center gap-5 text-[12px] uppercase tracking-[0.5em] text-indigo-400 font-black animate-pulse">
-                  <span className="relative flex h-4 w-4">
-                    <span className="animate-ping absolute h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                    <span className="relative rounded-full h-4 w-4 bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,1)]"></span>
-                  </span>
                   Synaptic Stream Active
                 </div>
               </div>
@@ -641,111 +644,59 @@ const App: React.FC = () => {
           </div>
         </section>
 
-        <section className="w-full lg:w-[520px] glass rounded-[5rem] flex flex-col overflow-hidden shadow-4xl border border-white/10 bg-black/50">
+        <section className="w-full lg:w-[520px] glass rounded-[5rem] flex flex-col overflow-hidden bg-black/50">
           <div className="p-12 border-b border-white/5 bg-white/5 flex justify-between items-center backdrop-blur-5xl">
             <div className="flex flex-col">
                 <h2 className="heading text-xs font-black text-slate-300 uppercase tracking-[0.4em]">Synaptic Transcripts</h2>
-                <span className="text-[10px] text-indigo-500 mt-2 font-black uppercase tracking-widest opacity-60">Neural Logic Engine</span>
             </div>
-            <button onClick={startNewConversation} className="p-4 bg-white/5 hover:bg-indigo-600/30 text-indigo-400 rounded-3xl transition-all border border-transparent hover:border-indigo-500/30 shadow-xl" title="Purge Sync history">
+            <button onClick={startNewConversation} className="p-4 bg-white/5 hover:bg-indigo-600/30 text-indigo-400 rounded-3xl transition-all border border-transparent hover:border-indigo-500/30">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             </button>
           </div>
-
           <div className="flex-1 overflow-y-auto p-12 space-y-12 custom-scrollbar bg-black/30">
-            {history.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-700 italic text-sm text-center px-16 space-y-16 opacity-30">
-                <div className="relative">
-                  <div className="w-32 h-32 border-2 border-dashed border-indigo-900/50 rounded-full flex items-center justify-center animate-spin-slow">
-                    <div className="w-5 h-5 bg-indigo-600 rounded-full animate-pulse shadow-4xl shadow-indigo-600" />
+            {history.map((entry, idx) => (
+              <div key={idx} className={`flex flex-col ${entry.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in group`}>
+                <span className={`text-[11px] mb-3 font-black uppercase tracking-[0.2em] mx-6 flex items-center gap-3 ${entry.role === 'user' ? 'text-slate-600' : 'text-indigo-500'}`}>
+                  {entry.role === 'user' ? 'Inbound Signal' : 'MindV Logic'}
+                </span>
+                {entry.text && (
+                  <div className={`p-8 rounded-[3rem] text-sm leading-[1.8] shadow-3xl ${entry.role === 'user' ? 'bg-zinc-900 text-slate-300 rounded-tr-none border border-white/5' : 'bg-indigo-600/10 text-indigo-50 rounded-tl-none border border-indigo-500/25 backdrop-blur-2xl'}`}>
+                    {entry.text}
                   </div>
-                </div>
-                <p className="leading-relaxed font-black tracking-[0.3em] uppercase text-[11px]">Establishing resonance. Awaiting academic inquiry.</p>
+                )}
+                {entry.image && (
+                  <div className="mt-4 max-w-full rounded-[2rem] overflow-hidden border border-white/10 shadow-4xl group/img relative">
+                    <img src={entry.image} alt="Visual Projection" className="w-full h-auto object-cover" />
+                  </div>
+                )}
               </div>
-            ) : (
-              history.map((entry, idx) => (
-                <div key={idx} className={`flex flex-col ${entry.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in group`}>
-                  <span className={`text-[11px] mb-3 font-black uppercase tracking-[0.2em] mx-6 flex items-center gap-3 ${entry.role === 'user' ? 'text-slate-600' : 'text-indigo-500'}`}>
-                    {entry.role === 'user' ? (
-                        <>Signal Inbound <div className="w-1.5 h-1.5 bg-slate-700 rounded-full" /></>
-                    ) : (
-                        <><div className="w-1.5 h-1.5 bg-indigo-600 rounded-full shadow-[0_0_8px_rgba(99,102,241,1)]" /> MindV Logic</>
-                    )}
-                  </span>
-                  
-                  {entry.text && (
-                    <div className={`p-8 rounded-[3rem] text-sm leading-[1.8] shadow-3xl transition-all duration-700 ${
-                      entry.role === 'user' ? 'bg-zinc-900 text-slate-300 rounded-tr-none border border-white/5 group-hover:bg-zinc-800' : 'bg-indigo-600/10 text-indigo-50 rounded-tl-none border border-indigo-500/25 backdrop-blur-2xl'
-                    }`}>
-                      {entry.text}
-                    </div>
-                  )}
-
-                  {entry.image && (
-                    <div className="mt-4 max-w-full rounded-[2rem] overflow-hidden border border-white/10 shadow-4xl group/img relative">
-                      <img src={entry.image} alt="AI Visual Projection" className="w-full h-auto object-cover hover:scale-[1.02] transition-transform duration-700" />
-                      <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-xl px-4 py-1.5 rounded-full border border-white/10">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Projected Visual Map</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+            ))}
             <div ref={historyEndRef} />
           </div>
         </section>
       </main>
 
-      {/* Protocols Overlay */}
-      {showHelp && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-3xl animate-fade-in">
-          <div className="glass max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-[5rem] p-16 md:p-20 border border-white/10 shadow-5xl relative animate-scale-up custom-scrollbar bg-black/60">
-            <button onClick={() => setShowHelp(false)} className="absolute top-12 right-12 p-5 rounded-full hover:bg-white/10 transition-colors text-slate-500 hover:text-white border border-white/5">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-            <h2 className="heading text-5xl font-bold text-white mb-12 tracking-tight">Intelligence Protocols</h2>
-            
-            <div className="space-y-16 text-slate-400 text-base leading-[2]">
-              <section>
-                <h3 className="text-indigo-400 font-black uppercase tracking-[0.4em] text-[13px] mb-8 border-b border-indigo-500/30 pb-4">Universal Polyglot</h3>
-                <p>MindV is programmed with absolute fluency in global languages. From high-register English to the rhythmic nuances of Akan (Twi), the system adapts its linguistic core to match your identity profile.</p>
-              </section>
-
-              <section>
-                <h3 className="text-indigo-400 font-black uppercase tracking-[0.4em] text-[13px] mb-8 border-b border-indigo-500/30 pb-4">Compassionate Voice</h3>
-                <p>Synthesis of emotional awareness allows MindV to sense grief, pain, or illness. In such times, the voice modulates to a deeply calm and supportive register to provide solace and strength.</p>
-              </section>
-
-              <section>
-                <h3 className="text-indigo-400 font-black uppercase tracking-[0.4em] text-[13px] mb-8 border-b border-indigo-500/30 pb-4">Honourable Synchronization</h3>
-                <ul className="space-y-6 list-none">
-                  <li className="flex gap-6"><span className="text-indigo-600 font-black">01</span><span>All neural logs are locally encrypted. MindV does not store data on external cores.</span></li>
-                  <li className="flex gap-6"><span className="text-indigo-600 font-black">02</span><span>Professional decorum is required for optimal synaptic synchronization.</span></li>
-                  <li className="flex gap-6"><span className="text-indigo-600 font-black">03</span><span>Supporting the developer ensures the continuous update of these logic models.</span></li>
-                </ul>
-              </section>
-            </div>
-            
-            <button onClick={() => setShowHelp(false)} className="w-full mt-20 bg-indigo-600 text-white font-black py-8 rounded-[3rem] hover:bg-indigo-500 transition-all shadow-4xl shadow-indigo-600/30 uppercase tracking-[0.3em] text-sm">Synchronize Protocols</button>
-          </div>
-        </div>
-      )}
-
-      {/* Global Notifications */}
+      {/* Global Notifications with Key Selection */}
       {error && (
         <div className="fixed top-36 inset-x-0 flex justify-center px-8 z-[200] pointer-events-none">
-          <div className="bg-red-950/95 border border-red-500/50 backdrop-blur-5xl p-10 rounded-[4rem] flex items-center gap-10 max-w-3xl w-full shadow-4xl animate-slide-down pointer-events-auto">
-             <div className="bg-red-500/25 p-6 rounded-3xl flex-shrink-0 animate-pulse">
-               <svg className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-             </div>
-             <div className="flex-1">
-               <h3 className="text-red-100 font-black text-2xl mb-3 uppercase tracking-tight">{error.title}</h3>
-               <p className="text-red-300/90 text-sm leading-relaxed font-bold">{error.message}</p>
-               <div className="flex gap-10 mt-8">
-                   <button onClick={() => setError(null)} className="text-[12px] font-black uppercase tracking-[0.4em] text-red-400 hover:text-white transition-all">Acknowledge Fault</button>
-                   <button onClick={() => window.location.reload()} className="text-[12px] font-black uppercase tracking-[0.4em] text-white bg-red-600 px-6 py-2 rounded-2xl shadow-xl">Re-establish Sync</button>
+          <div className="bg-red-950/95 border border-red-500/50 backdrop-blur-5xl p-10 rounded-[4rem] flex flex-col items-center gap-6 max-w-3xl w-full shadow-4xl animate-slide-down pointer-events-auto">
+             <div className="flex items-center gap-10">
+               <div className="bg-red-500/25 p-6 rounded-3xl flex-shrink-0">
+                 <svg className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                </div>
+               <div className="flex-1">
+                 <h3 className="text-red-100 font-black text-2xl mb-3 uppercase tracking-tight">{error.title}</h3>
+                 <p className="text-red-300/90 text-sm leading-relaxed font-bold">{error.message}</p>
+                 <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-red-400/60 underline mt-2 block italic">View Synapse Billing Documentation</a>
+               </div>
+             </div>
+             <div className="flex gap-10 mt-4 w-full justify-end">
+               <button onClick={() => setError(null)} className="text-[12px] font-black uppercase tracking-[0.4em] text-red-400 hover:text-white transition-all">Dismiss</button>
+               {error.isPermission ? (
+                 <button onClick={handleKeySelection} className="text-[12px] font-black uppercase tracking-[0.4em] text-white bg-indigo-600 px-8 py-3 rounded-2xl shadow-xl hover:bg-indigo-500 transition-all">Link Professional Synapse</button>
+               ) : (
+                 <button onClick={() => window.location.reload()} className="text-[12px] font-black uppercase tracking-[0.4em] text-white bg-red-600 px-8 py-3 rounded-2xl shadow-xl">Restart System</button>
+               )}
              </div>
           </div>
         </div>
